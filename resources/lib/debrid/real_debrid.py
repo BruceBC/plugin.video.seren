@@ -249,13 +249,53 @@ class RealDebrid:
             ThreadPool().map_results(self._check_hash_thread, ((sorted(section),) for section in hash_list))
             return self.cache_check_results
         else:
-            hash_string = f"/{hash_list}"
-            return self.get_url(f"torrents/instantAvailability{hash_string}")
+            magnet = 'magnet:?xt=urn:btih:' + hash_list
+            response = self.add_magnet(magnet)
+
+            # Missing id
+            if 'id' not in response:
+                return {}
+            
+            torr_id = response['id']
+            response = self.torrent_info(torr_id)
+
+            # Missing files
+            if 'files' not in response or len(response["files"]) <= 0:
+                response = self.delete_torrent(torr_id)
+                return {}
+
+            # Mock `torrents/instantAvailability/{hash | hash_1,hash2,hash_3,...}`
+            # Note: hash_list will always be a single hash here
+            hash_dict = {hash_list: {'rd':[]}}
+            for file in response['files']:
+                hash_dict[hash_list]['rd'].append({str(file['id']):{'filename':file['path'],'filesize':file['bytes']}})
+            response = self.delete_torrent(torr_id)
+            return hash_dict
 
     def _check_hash_thread(self, hashes):
-        hash_string = f"/{'/'.join(hashes)}"
-        response = self.get_url(f"torrents/instantAvailability{hash_string}")
-        self.cache_check_results.update(response)
+        for h in hashes:
+            magnet = 'magnet:?xt=urn:btih:' + h
+            response = self.add_magnet(magnet)
+
+            # Missing id
+            if 'id' not in response:
+                continue
+
+            torr_id = response['id']
+            response = self.torrent_info(torr_id)
+
+            # Missing files
+            if 'files' not in response or len(response["files"]) <= 0:
+                response = self.delete_torrent(torr_id)
+                continue
+
+            # Mock `torrents/instantAvailability/{hash | hash_1,hash2,hash_3,...}`
+            # Note: h will always be a single hash here
+            hash_dict = {h: {'rd':[]}}
+            for file in response['files']:
+                hash_dict[h]['rd'].append({str(file['id']):{'filename':file['path'],'filesize':file['bytes']}})
+            response = self.delete_torrent(torr_id)
+            self.cache_check_results.update(hash_dict)
 
     def add_magnet(self, magnet):
         post_data = {"magnet": magnet}
